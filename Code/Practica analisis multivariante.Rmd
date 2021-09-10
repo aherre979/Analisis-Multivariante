@@ -1,0 +1,182 @@
+---
+title: 'Ejercicio Final: Analisis multivariante'
+author: "Alvaro Herreruela"
+date: "13/1/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(GGally) 
+library(factoextra)
+library(VIM)
+library(Quandl)
+library(VIM)
+library(lubridate)
+library(quantmod)
+library(corrplot)
+library(knitr)
+library(binr)
+library(ggplot2)
+home <- read.csv('HomeSalesData.csv')
+home$id <- NULL
+home$date <- NULL
+price <- home$price
+home$price <- NULL
+```
+
+## Preprocesando
+
+Para garantizar la calidad de los datos, es preciso analizar si nuetro dataset cumple con los requisitos de integridad, consistencia, uniformidad, densidad y unicidad. Haciendo un primer análisis, a través del summary, podemos observar que no existen missing values o Nas. Aún así para seguir el principio de integridad, consistencia  y uniformidad, es necesario estudiar las anomalías como pueden ser los valores atípicos o outliers. Podemos observar, a través del summary, que algunas variables como el número de habitacion y de baños o los pies cuadrados de terreno, tienen un maximo muy alejado del tercer cuartil y hay casas que tienen 0 habitaciones y 0 baños, lo que nos da una primera idea de que podrían exisitir datos anómalos a tratar. También, podemos observar la presencia de ruido con datos dentro de baños que no son enteros. Además, existen valores duplicados que pueden romper el principio de unicidad. He encontrado redundancia en las variales sqtf_living, sqtf_above y sqtf_basement, ya que la suma de above y basement es igual que living, por lo tanto quitaré una de estas variables antes de meterla en mi modelo. Por último, he hecho un binning sobre el zipcode para dividir los datos por zonas y que así sea más facil extraer inputs en el análisis multivariante, más tarde quitaré la variable que más me convenga justo antes de realizar el modelo para que no haya redundancia de datos.
+
+He analizado las anomalías y los valores duplicados, y he decidido dejarlos (excepto la casa con 33 habitaciones). Las razones son:
+
+  1) Los datos aunque en un principio parezcan anómalos, pueden no serlo (pueden existir locales comerciales o pequeños estudios que no tengan baños ni habitaciones).
+  
+  2) Pueden existir valores duplicados ya que pueden existir viviendas similares(un bloque de pisos)
+  
+  3) quitarlos no va a indicidir de manera significativa
+
+```{r pre}
+head(home)
+tail(home)
+summary(home)
+sum(is.na(home))
+glimpse(home)
+home$bins <- cut(home$zipcode,10,labels=c('Zona1','Zona2','Zona3','Zona4','Zona5','Zona6','Zona7','Zona8','Zona9','Zona10'))
+home2 <- home[!(home$bedrooms < 1 | home$bathrooms < 1 ),]
+summary(home2)# no cambian los parámetros
+home[home$bathrooms == 8,]
+duplicate <- home[duplicated(home),] #186 valores duplicados
+                                      #print((dim(duplicate)[1]/dim(home)[1])*100) representan unicamente un 0,86% del total
+
+boxplot(select(home, bedrooms, bathrooms, sqft_lot))
+```
+
+
+
+
+
+
+Podemos observar en estos ultimos boxplots la presencia de valores atípicos o ouliers debido a la diversidad de tipos de casas. La mayoría de casas serán estandar pero existiran otras más grandes o con más habitaciones que se saldrán del 1.5*iqr. Analizaremos esto con más profundidad en el análisis multivariante. 
+
+## Análisis multivariante
+La detección y tratamiento de ouliers es una tarea tanto del preprocesamiento de datos, como del análisis multivariante. Como hemos podido observar las variables que contenían datos más extremos eran las de bathroom, bedroom y sqft_lot. Eran las variables que he tratado en el preprocesamiento porque me parecía, en un primer momento, que sus máximos y mínimos no tenían sentido. Vamos a hacer por lo tanto un análisis que explique por qué existen estos valores atípicos y por qué es necesario dejarlos en nuestro modelo. Aún así, hay más variables que contienen outliers, ya que al final un outlier es un dato que se encuentra fuera de 1.5*iqr. Aquí podemos encontrar otras variables como sqft_living, sqft_living15, sqft_lot15 o sqft_basement que contiene también ouliers. Podemos observar, las medias de las diferentes variables en todo el dataset. Con las medias se puede observar que los datos pueden pertenecer a un dataset de viviendas de un país desarrollado ya que los metros cuadrados y el número de habtitaciones y baños contiene datos muy altos como para pertenecer a un país subdesarrollado.
+```{r analisis multivariante}
+boxplot(select(home,sqft_living, sqft_living15,   sqft_lot15, sqft_basement ))
+outliers <- home[home$sqft_lot < mean(home$sqft_lot) - 3* sd(home$sqft_lot) | home$sqft_lot >  mean(home$sqft_lot) + 3* sd(home$sqft_lot),]#encontramos 347 observaciones
+colMeans(select(home, -bins))
+````
+
+
+Un código postal te da informción sobre la zona en la que se situa una casa. Haciendo el binning, intentaba ordenar los datos por zonas para luego poder ver si estaba de alguna forma correlada con el nivel de vida de cada zona, observando si las casas dependiendo del código postal son más grandes o no para explicar de esta manera la existencia de los outliers. Podemos observar que la zona recogida por el código postal no es un indicador de el tamaño de una vivienda. Las zonas de donde se han recogido los datos, haciendo un primer análisis podriamos decir que son muy diversas en cuanto al tamaño de la vivienda y probablemente también en cuanto a renta per cápita de los ciudadanos.
+```{r analisis multivariante2}
+plot(home$sqft_living~ home$bins)
+plot(home$sqft_living~home$zipcode)
+kable(group_by(home, as.character(bins)) %>% 
+  summarise(mean_grade =mean(grade))%>% 
+      arrange(mean_grade))
+````
+
+Analizando la correlación de las variables, con un primer gráfico general de correlación, podemos observar que las variables que tienen los índices de correlación más alto son baños, metros cuadrados de vivienda, el grado, metros cuadrados sobre el suelo, y metros cuadrados de vivienda vecina. Si seguimos con un análisis más detallado de estas variables podemos observar como los metros cuadrados sobre el suelo y los metros cuadrados de vivienda estan linealmente muy correlacionados indicando que cuantos más metros de vivienda, más metros cuadrados sobre le suelo, porque como habíamos visto, una variable es la suma de otras dos. Podemos observar que, los metros cuadrados de vivienda están correlados positivamente con la de los vecinos, lo que me hace replantear la primera cuestión anterior sobre si en el dataset existe algún input que explique el nivel de vivienda por zonas. Además el grado de la vivienda está correlado linealmente de forma positiva con los metros cuadrados de vivienda, lo que indica que cuanto más grande sea una casa mejor valorada va a estar en cuanto a diseño y construcción. Esto nos da un input bastante interesante y es que en este dataset, probablemente las casas más pequeñas cuesten menos que las grandes o puede que sean más antiguas.  
+````{r analisis multivariante3}
+ggcorr(home, label= T)
+pairs(select(home,bathrooms, sqft_living,grade,sqft_above,sqft_living15))
+````
+
+Si seguimos con este análisis agrupando las zonas por código postal nos damos cuenta que aquellas zonas con un código postal más bajo (hasta la zona 5), las viviendas son mas grandes y están mejor valordas. Esto nos puede dar una idea de que nuestro dataset está dividido en dos clusters diferenciados y de igual tamaño donde desde la Zona 1 hasta la Zona 5 puede ser un distrito siendo las viviendas de un tipo (más grandes y mejor valoradas) y de la Zona 6 a la Zona 10 es otro distrito donde las viviendas son diferentes (más pequeñas y peor valoradas). Con el último gráfico quería mostrar como las variables no están descompensadas.
+
+````{r analisis multivariante4}
+kable(group_by(home,bins) %>% 
+  summarise(avg_m2 = mean(sqft_living)))
+
+kable(group_by(home, bins) %>% 
+  summarise(mean_grade =mean(grade))%>% 
+      arrange(bins))
+
+home$distrito <- cut(home$zipcode, 2, label = c('Distrito_1', 'Distrito_2'))
+
+kable(group_by(home,distrito) %>%
+  summarise(mean_grade = mean(grade), avg_m2 = mean(sqft_living)))
+
+barplot(table(home$distrito))
+````
+
+## PCA
+
+Ahora toca comprobar nuestro modelo. Para empezar he dummificado la variable distrito ya que es la que voy a utilizar para el modelo. He quitado la variable zipcode, bins y sqft_living para que no hubiese redundancia de datos a la hora de ejecutar el PCA.
+
+```{r pca}
+home$distrito <- ifelse(home$distrito == 'Distrito_1',1,0)
+zonas <- home$bins
+home$bins <- NULL
+zipcode <- home$zipcode
+home$zipcode <- NULL
+living <- home$sqft_living
+home$sqft_living <- NULL
+````
+Con el dataset ordenado, el siguiente paso es introducirlo en el modelo, donde además, hemos estandarizado las variables para reducirlas a la misma unidad de medida. Viendo el resumen del modelo, podemos observar como la desviación estandar o autovalor del primer componente es de 2.13 lo que no es una varianza muy alta comparada con el resto, y representa un 26,7% del total. Si nos metemos en su autovector asociado podemos ver los pesos que tienen las variables en nuestro set de datos. Aquí encontramos variables con índices positivos y negativos. Aun así, es más fácil verlo con una representación.
+
+
+````{r pca2}
+pca = prcomp(home, scale = T)
+summary(pca)
+kable(pca$rotation[,1])
+````
+En el primer gráfico podemos observar el peso que tiene cada componente en nuestro modelo. Si observamos el Cumulative Proportion del summary anterior y el gráfico de ahora, podemos observar que las tres primeras componentes ocupan aproximadamente un 50% del total, aunque para este análisis nos quedaremos con las 2 primeras que engloban aproximadamente un 40% del total. Analizando la primera componente, podemos observar que las variables que más peso tienen son baños, metros cuadrados de vivienda, grado, metros cuadrados sobre el suelo y metros cuadrados de los 15 vecinos. Esta primera componente está representando el tamaño de una casa ya que vemos que las variables que en el análisis multivariante tenían una correlación positiva con los metros cuadrados de la vivienda, son las que mas peso tienen en la PCA. Además, como he dicho antes he puesto un 1 en Distrito 1 al dummificar la variable y como hemos visto el primer distrito tenía las viviendas más grande y estaban mejor valoradas que en el Distrito 2, lo que hace que su peso sea positivo en PCA. Si cambiamos el dummie y le ponemos 1 al Distrito 2 que en comparación con el 1 estaba peor valorado y era mas pequeño, observamos que la variable distrito cuando la volvemos a representar de nuevo en el PCA, aparece negativo. Con esto quiero dar pruebas suficientes para respaldar mi teoría de que la primera componente está representando el tamaño de una vivienda. Sabiendo ya que este gráfico representa el tamaño de una vivienda podemos observar datos interesantes que en un principio pueden parecer incongruentes como que, los metros cuadrados de terreno no tienen apenas peso. Habíamos visto ademas que los pisos(floors) tenía correlación positiva con los metros cuadrados, por lo tanto, también es una variable explicativa en el tamaño de una vivienda. El año de construcción, aunque no hubiesemos observado ningún tipo de correlación con el resto de variables en el análisis multivariante, parece que cuanto más reciente es una vivienda, más grande va a ser. Las variables negativas apenas tienen peso por lo que son poco interpretables.
+````{r pca3}
+fviz_screeplot(pca, addlabels = TRUE)
+barplot(pca$rotation[,1], las=2, col="darkblue")
+home$distrito <- ifelse(home$distrito == 1,0,1)
+pca = prcomp(home, scale = T)
+barplot(pca$rotation[,1], las=2, col="darkblue")
+````
+
+Si elevamos el autovector asociado a la primera componente al cuadrado, quitamos el signo y podemos observar la contribución de las diferentes variables a nuestro modelo. Las 4 primeras barras/variables son las que mejor interpretan el tamaño de una vivienda, por lo tanto, si analizamos cómo de grande es una casa veremos que si esa casa tiene muchos metros cuadrados sobre el suelo, muchos baños, mucha valoración en la construción y diseño de una casa y los 15 vecinos más próximos tienen muchos metros cuadrados de vivienda, la casa va a ser grande.
+```{r pca4}
+fviz_contrib(pca, choice = "var", axes = 1)
+````
+
+La segunda componente siempre es más difícil de interpretar que la primera. Podemos distingir dos tipos de viviendas: Aquellas que se han construido recientemente y tienen una mayor longitud y otras que tienen muy poco sótano, malas condiciones y malas vistas y como vemos se encuentra en el distrito 2 el cual tenía casas más pequeñas y peor valoradas. El primer tipo de vivienda que he descrito podrían ser viviendas más modernas y minimalistas y las otras pueden ser pisos más antiguos y peor valorados.
+```{r pca5}
+barplot(pca$rotation[,2], las=2, col="darkblue")
+````
+
+Graficando amabas componentes, dandole el valor a los puntos de manera que 1 se refiera al distrito 1 y 2 al distrito 2 y dándole color al precio, observamos que cuanto mas positivo es el PC1, más color tiene, indicando que las casas son más caras cuanto mayor tamaño tienen y que las casas más grandes suelen pertenecer al distrito 1 como ya habíamos comentado. Podemos observar además, que si seguimos por el eje de las 'y', el tipo de vivienda que más abunda en la parte superior es del distrito 1 y el que más abunda en la parte inferior es del distrito 2, indicando que las casas situadas en la parte posterior, como habíamos visto ya son más modernas y tienen más calidad. Es curioso ver como los puntos más osucuros, que indican que cuestan más, son puntos que se encuentran en la parte negativa del eje de las 'y' indicando que estas casas cuestan mucho y son más antiguas y peor valoradas.
+````{r pca6}
+home$distrito <- ifelse(home$distrito == 1, 2,1)
+data.frame(z1=pca$x[,1],z2=pca$x[,2]) %>% 
+  ggplot(aes(z1,z2,label=home$distrito, color=price)) + geom_point(size=0) +
+  labs(title="PCA", x="PC1", y="PC2") +
+  theme_bw() + scale_color_gradient(low="lightblue", high="darkblue")+theme(legend.position="bottom") + geom_text(size=2, hjust=0.6, vjust=0, check_overlap = TRUE) 
+ 
+````
+
+## FACTOR ANALISIS
+
+Factor análisis es otro metodo que te permite reducir el número de dimensiones para mejorar la interpretación y predicción de tus datos. Para realizarlo he utilizado la rotación varimax, donde en vez de reducirme el error me maximiza L mejorando la estimación de mi modelo. He reducido la dimensión a 2 para predecir.Aunque es verdad que con 3 factores en algunas variables como sqft_lot o sqft_lot15 mejora nuestra prediccion disminuyendo el nivel de uniqueness y por lo tanto indicando que hay menos subjetividad en esa variable, en el computo general las variables se mantienen prácticamente igual. Los niveles de subjetividad de muchas de las variables, son altas indicando que estas variables son muy subjetivas. Podemos observar además que aquellas variables con mayor correlación en el primer factor, normalmente son más objetivas (uniqueness más bajo) que las que no.
+````{r fa}
+home$distrito <- ifelse(home$distrito == 1, 0,1)
+fa <- factanal(home, factors = 2, rotation = 'varimax', scores = 'Bartlett')
+fa2 <- factanal(home, factors = 3, rotation = 'varimax', scores = 'Bartlett')
+kable(cbind(fa2$loadings,fa2$uniquenesses, fa$loadings,fa$uniquenesses))
+data.frame(x1=fa$loadings[,1],x2=fa$uniquenesses) %>% 
+  ggplot(aes(x1,x2)) + geom_point() +
+  labs(title="FA", x="Factor 1", y="uniquenesses") 
+````
+
+Graficando las variables, podemos observar que las variables que más correlación tienen son otra vez baños, grados, metros cuadrados sobre el suelo y metros cuadrados de los 15 vecinos más próximos. Esto podría ser perfectamente, igual que el primer componente del pca, el tamaño de una casa ya que las componentes que más alta tienen la correlación y que expresan más objetivamente mi modelo son las mismas que en el pca. En el segundo factor pasa lo mismo, las variables se distribuyen de manera muy similar a la segunda componente del pca, teniendo un tipo de vivienda más nueva y mejor valorada y otra que se encuentra en el distrito donde las casas son mas pequeñas, las condiciones peores y están peor valoradas. A diferencia de lo que podemos observar en pca, el grado afecta positivamente a las casas más modernas aunque de manera menos significativa de como afectaba negativamente en pca.
+```{r fa2}
+barplot(fa$loadings[,1], las=2, col="darkblue", ylim = c(-0.5, 1))
+barplot(fa$loadings[,2], las=2, col="darkblue", ylim = c(-1, 1))
+````
+
+## CONCLUSIONES
+
+
+Como hemos podido observar la interpretacion del Factor Análisis y el PCA en este caso es muy similar en ambos factores y componentes. El PCA aun así, está calculando los pesos que tienen las diferentes variables, a través de lo que conocemos como vector asociado al autovalor o a la varianza de la componente. En cambio el Factor Analálisis te esta indicando la correlación que tienen las variables con el modelo, es por eso que en PCA las componentes no están correladas mientras que en Factor Análisis los factores sí que lo están. Es por esto, que Factor Análisis y PCA se utilizan para situaciones diferentes. Factor Análisis se utiliza mejor para predecir situaciones no medibles con altos niveles de sujetividad. Mientras que PCA es más fácil utilizarlo cuando intentamos demostrar mediante la objetividad de las variables su comportamiento frente a la variable respuesta. Es por eso, que si no hay subjetividad en un modelo, ambos predicen lo mismo, ya que Factor Análisis te permite distinguir entre la parte objetiva y subjetiva. Además, en PCA las variables cambian la respuesta, en cambio en Factor Análisis la respuesta causa las variables. Por lo tanto, las áreas en las que se utiliza Facto Análisis suelen estar orientadas a psicologia y marketing debido al valor subjetivo de sus variables, y PCA se suele utilizar más en modelos económicos con altos niveles de objetividad en las variables.
+
+En este caso, ambos modelos reduciendo la dimension a 3 y 2 nos han predecido prácticamente igual. Esto ha podido darse porque hay variables con altos niveles de subjetividad y otras con niveles más bajos. En este caso veo mejor utilizar Factor Análisis ya que podemos obtener más información de las variables, midiendo su grado de subjetividad lo que va a mejorar nuestra interpretación del modelo. Además, los rangos de subjetividad en el computo global son altos para medirlo con PCA.
+
+Por último, me gustaria recalcar que utilizando ambos métodos hemos obtenido las mismas conclusiones sobre la interpretacion del modelo. Si utilizamos la primera componente y segunda componente o el primer y segundo factor  podemos observar que las variables que más peso tienen o más correlación tienen, son las mismas en ambos modelos. En la primera nos habla de las variables que inciden sobre el tamaño de una casa y la segunda (más difícil de interpretar), nos habla de las variables que inciden sobre el tipo de casa según su antiguedad y valoración. Esto se puede aplicar de manera que si eres una inmobiliaria, vas a saber aconsejar a tus clientes según sus exigencias y límites, qué comprar y dónde. Pero esto es solo un ejemplo ya que, una de las ventajas que tiene la profesión de analista es la inmensa magnitud de posibilidades e interpretaciones que le puedes dar a un único set de datos. 
+
